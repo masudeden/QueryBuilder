@@ -42,16 +42,36 @@ class QueryBuilder
     private $pdo;
     private $table;
     private $where = [];
+    private $orWhere = [];
+    private $whereBetween = [];
+    private $whereNotBetween = [];
+    private $whereBetweenColumns = [];
+    private $whereNotBetweenColumns = [];
+    private $whereIn = [];
+    private $whereNotIn = [];
+    private $whereNull = [];
+    private $whereNotNull = [];
+    private $whereDate = [];
+    private $whereMonth = [];
+    private $whereDay = [];
+    private $whereYear = [];
+    private $whereTime = [];
+    private $whereColumn = [];
     private $select = [];
+    private $orderBy = [];
     private $limit;
-    
+    private $offset;
+    private $latestColumn;
+    private $inRandomOrder;
+    private $groupBy = [];
+    private $having = [];
+
 
     public function __construct(PDO $pdo, $table)
     {
         $this->pdo = $pdo;
         $this->table = $table;
     }
-
     public function where($column, $operator, $value = null)
     {
         if ($value === null) {
@@ -62,7 +82,93 @@ class QueryBuilder
         $this->where[] = compact('column', 'operator', 'value');
         return $this;
     }
+    public function orWhere($column, $operator, $value = null)
+    {
+        if ($value === null) {
+            $value = $operator;
+            $operator = '=';
+        }
 
+        $this->orWhere[] = compact('column', 'operator', 'value');
+        return $this;
+    }
+    public function whereBetween($column, array $values)
+    {
+        $this->whereBetween[] = compact('column', 'values');
+        return $this;
+    }
+    public function whereNotBetween($column, array $values)
+    {
+        $this->whereNotBetween[] = compact('column', 'values');
+        return $this;
+    }
+    public function whereBetweenColumns($column, array $rangeColumns)
+    {
+        $this->whereBetweenColumns[] = compact('column', 'rangeColumns');
+        return $this;
+    }
+    public function whereNotBetweenColumns($column, array $rangeColumns)
+    {
+        $this->whereNotBetweenColumns[] = compact('column', 'rangeColumns');
+        return $this;
+    }
+    public function whereIn($column, array $values)
+    {
+        $this->whereIn[] = compact('column', 'values');
+        return $this;
+    }
+    public function whereNotIn($column, array $values)
+    {
+        $this->whereNotIn[] = compact('column', 'values');
+        return $this;
+    }
+    public function whereNull($column)
+    {
+        $this->whereNull[] = $column;
+        return $this;
+    }
+    public function whereNotNull($column)
+    {
+        $this->whereNotNull[] = $column;
+        return $this;
+    }
+    public function whereDate($column, $date)
+    {
+        $this->whereDate[] = compact('column', 'date');
+        return $this;
+    }
+    public function whereMonth($column, $month)
+    {
+        $this->whereMonth[] = compact('column', 'month');
+        return $this;
+    }
+    public function whereDay($column, $day)
+    {
+        $this->whereDay[] = compact('column', 'day');
+        return $this;
+    }
+    public function whereYear($column, $year)
+    {
+        $this->whereYear[] = compact('column', 'year');
+        return $this;
+    }
+    public function whereTime($column, $operator, $time)
+    {
+        $this->whereTime[] = compact('column', 'operator', 'time');
+        return $this;
+    }
+    public function whereColumn($firstColumn, $operatorOrSecondColumn, $secondColumn = null)
+    {
+        if ($secondColumn === null) {
+            $operator = '=';
+            $secondColumn = $operatorOrSecondColumn;
+        } else {
+            $operator = $operatorOrSecondColumn;
+        }
+
+        $this->whereColumn[] = compact('firstColumn', 'operator', 'secondColumn');
+        return $this;
+    }
     public function select(...$columns)
     {
         $this->select = $columns;
@@ -75,6 +181,13 @@ class QueryBuilder
         $result = $this->get();
 
         return !empty($result) ? $result[0] : null;
+    }
+
+    public function latest($column = 'created_at')
+    {
+        $this->orderBy($column, 'desc');
+        $this->latestColumn = $column;
+        return $this;
     }
 
     public function first()
@@ -116,26 +229,68 @@ class QueryBuilder
         return isset($result[0]['avg']) ? $result[0]['avg'] : null;
     }
 
+    public function orderBy($column, $direction = 'asc')
+    {
+        $this->orderBy[] = compact('column', 'direction');
+        return $this;
+    }
+
+    public function inRandomOrder()
+    {
+        $this->inRandomOrder = true;
+        return $this;
+    }
+
+
     public function limit($count)
     {
         $this->limit = $count;
         return $this;
     }
 
+    public function skip($offset)
+    {
+        $this->offset = $offset;
+        return $this;
+    }
+
+    public function take($count)
+    {
+        $this->limit($count);
+        return $this;
+    }
+
+    public function groupBy(...$columns)
+    {
+        $this->groupBy = array_merge($this->groupBy, $columns);
+        return $this;
+    }
+
+    public function having($column, $operator, $value = null)
+    {
+        if ($value === null) {
+            $value = $operator;
+            $operator = '=';
+        }
+
+        $this->having[] = compact('column', 'operator', 'value');
+        return $this;
+    }
+
     public function get()
     {
         $sql = "SELECT ";
-
+    
         // Add selected columns
         if (!empty($this->select)) {
             $sql .= implode(', ', $this->select);
         } else {
             $sql .= '*';
         }
-
+    
         $sql .= " FROM {$this->table}";
         $params = [];
-
+    
         if (!empty($this->where)) {
             $sql .= ' WHERE';
             foreach ($this->where as $condition) {
@@ -143,18 +298,188 @@ class QueryBuilder
                 $params[":{$condition['column']}"] = $condition['value'];
             }
             $sql = rtrim($sql, ' AND');
-
+    
             // Reset $where after conditions are used
             $this->where = [];
         }
 
+        if (!empty($this->orWhere)) {
+            $sql .= ' OR';
+            foreach ($this->orWhere as $condition) {
+                $sql .= " {$condition['column']} {$condition['operator']} :{$condition['column']} OR";
+                $params[":{$condition['column']}"] = $condition['value'];
+            }
+            $sql = rtrim($sql, ' OR');
+
+            // Reset $where after conditions are used
+            $this->orWhere = [];
+        }
+
+        if (!empty($this->whereBetween)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereBetween as $condition) {
+                $sql .= " {$condition['column']} BETWEEN :{$condition['column']}_start AND :{$condition['column']}_end AND";
+                $params[":{$condition['column']}_start"] = $condition['values'][0];
+                $params[":{$condition['column']}_end"] = $condition['values'][1];
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereNotBetween)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereNotBetween as $condition) {
+                $sql .= " {$condition['column']} NOT BETWEEN :{$condition['column']}_start AND :{$condition['column']}_end AND";
+                $params[":{$condition['column']}_start"] = $condition['values'][0];
+                $params[":{$condition['column']}_end"] = $condition['values'][1];
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereBetweenColumns)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereBetweenColumns as $condition) {
+                $sql .= " {$condition['column']} BETWEEN {$condition['rangeColumns'][0]} AND {$condition['rangeColumns'][1]} AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereNotBetweenColumns)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereNotBetweenColumns as $condition) {
+                $sql .= " {$condition['column']} NOT BETWEEN {$condition['rangeColumns'][0]} AND {$condition['rangeColumns'][1]} AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereIn)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereIn as $condition) {
+                $sql .= " {$condition['column']} IN (:" . implode(', :', $condition['values']) . ") AND";
+                foreach ($condition['values'] as $value) {
+                    $params[":$value"] = $value;
+                }
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereNotIn)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereNotIn as $condition) {
+                $sql .= " {$condition['column']} NOT IN (:" . implode(', :', $condition['values']) . ") AND";
+                foreach ($condition['values'] as $value) {
+                    $params[":$value"] = $value;
+                }
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereNull)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereNull as $column) {
+                $sql .= " {$column} IS NULL AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereNotNull)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereNotNull as $column) {
+                $sql .= " {$column} IS NOT NULL AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereDate)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereDate as $condition) {
+                $sql .= " DATE({$condition['column']}) = '{$condition['date']}' AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereMonth)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereMonth as $condition) {
+                $sql .= " MONTH({$condition['column']}) = '{$condition['month']}' AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereDay)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereDay as $condition) {
+                $sql .= " DAY({$condition['column']}) = '{$condition['day']}' AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereYear)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereYear as $condition) {
+                $sql .= " YEAR({$condition['column']}) = '{$condition['year']}' AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereTime)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereTime as $condition) {
+                $sql .= " TIME({$condition['column']}) {$condition['operator']} '{$condition['time']}' AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+        if (!empty($this->whereColumn)) {
+            $sql .= ' WHERE';
+            foreach ($this->whereColumn as $condition) {
+                $sql .= " {$condition['firstColumn']} {$condition['operator']} {$condition['secondColumn']} AND";
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+
+
+        if (!empty($this->orderBy)) {
+            $sql .= ' ORDER BY ';
+            foreach ($this->orderBy as $order) {
+                $sql .= "{$order['column']} {$order['direction']}, ";
+            }
+            $sql = rtrim($sql, ', ');
+        }
+
+        if ($this->inRandomOrder) {
+            $sql .= ' ORDER BY RAND()';
+        } elseif (!empty($this->orderBy)) {
+            $sql .= ' ORDER BY ';
+            foreach ($this->orderBy as $order) {
+                $sql .= "{$order['column']} {$order['direction']}, ";
+            }
+            $sql = rtrim($sql, ', ');
+        }
+    
         if (isset($this->limit)) {
             $sql .= " LIMIT {$this->limit}";
         }
+    
+        if (isset($this->offset)) {
+            $sql .= " OFFSET {$this->offset}";
+        }
 
+        if (!empty($this->groupBy)) {
+            $sql .= ' GROUP BY ' . implode(', ', $this->groupBy);
+        }
+
+        if (!empty($this->having)) {
+            $sql .= ' HAVING';
+            foreach ($this->having as $condition) {
+                $sql .= " {$condition['column']} {$condition['operator']} :{$condition['column']} AND";
+                $params[":{$condition['column']}"] = $condition['value'];
+            }
+            $sql = rtrim($sql, ' AND');
+        }
+    
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
-
+    
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -401,11 +726,154 @@ print_r($filteredRowsById3); */
 
 /* $filteredRowsById4 = $users->where('status', '=', 'active')->get(); 
 print_r($filteredRowsById4); */
+/* 
+$filteredRowsById5 = $users->where('age', '>', 25)
+                    ->where('status', 'active')
+                    ->get();
 
+print_r($filteredRowsById5); */
+
+
+/* $filteredRowsById6 = $users->where('age', '>', 25)
+                    ->orWhere('status', 'active')
+                    ->get();
+
+print_r($filteredRowsById6); */
+
+/* $filteredRowsById7 = $users
+                    ->whereBetween('age', [25, 30])
+                    ->get();
+
+print_r($filteredRowsById7); */
+
+/* $filteredRowsById8 = $users
+    ->whereNotBetween('age', [24, 26])
+    ->get();
+
+print_r($filteredRowsById8); */
+
+/* $patients = Database::table('patients')
+    ->whereBetweenColumns('weight', ['minimum_allowed_weight', 'maximum_allowed_weight'])
+    ->get();
+
+print_r($patients); */
+
+/* $patients = Database::table('patients')
+    ->whereNotBetweenColumns('weight', ['minimum_allowed_weight', 'maximum_allowed_weight'])
+    ->get();
+
+print_r($patients); */
+
+/* $filteredRowsById9 = Database::table('patients')
+    ->whereIn('id', [1, 3, 8, 10])
+    ->get();
+
+print_r($filteredRowsById9); */
+
+/* $filteredRowsById10 = $users
+    ->whereNotIn('id', [1, 2, 3])
+    ->get();
+
+print_r($filteredRowsById10); */
+
+
+/* $whereNull=$users
+    ->whereNull('email')
+    ->get();
+print_r($whereNull); */
+
+/* $whereNotNull = $users
+    ->whereNotNull('email')
+    ->get();
+
+print_r($whereNotNull); */
+
+/* $whereDate = $users
+    ->whereDate('created_at', '2016-12-31')
+    ->get();
+
+print_r($whereDate); */
+
+/* $whereMonth = $users
+    ->whereMonth('created_at', '12')
+    ->get();
+
+print_r($whereMonth); */
+
+/* $whereDay = $users
+    ->whereDay('created_at', '31')
+    ->get();
+print_r($whereDay); */
+
+/* $whereYear = $users
+    ->whereYear('created_at', '2016')
+    ->get();
+
+print_r($whereYear); */
+
+/* $whereTime = $users
+    ->whereTime('created_at', '=', '12:15:24')
+    ->get();
+
+print_r($whereTime); */
+
+/* $whereColumn = $users
+    ->whereColumn('created_at', 'updated_at')
+    ->get();
+
+print_r($whereColumn); */
+
+/* $whereColumn = $users
+->whereColumn('created_at', '>', 'updated_at')
+->get();
+
+print_r($whereColumn);  */
 
 // Retrieve all rows without any conditions
 /* $allRows = $users->get();
 print_r($allRows); */
+
+//Retrive all rows without any conditions and with orderBy ASC
+/* $results = $users->orderBy('name')->get();
+print_r($results); */
+
+//Retrive all rows with orderBy DESC
+/* $orderByDESC=$users->orderBy('name', 'desc')
+                ->get();
+print_r($orderByDESC); */
+
+/* $orderByMultiColumn=$users
+                ->orderBy('name', 'desc')
+                ->orderBy('age', 'asc')
+                ->get();
+
+print_r($orderByMultiColumn);
+ */
+
+ // Retrieve the first 3 users
+/* $limitedUsers = $users->limit(3)->get();
+print_r($limitedUsers); */
+
+// Retrieve users with a where condition and a limit of 10
+/* $filteredLimitedUsers = $users->where('age', '>', 22)->limit(2)->get();
+print_r($filteredLimitedUsers); */
+
+// Skip the first 10 users and take the next 5
+/* $limitedUsersWithSkip=$users->skip(2)->take(3)->get();
+print_r($limitedUsersWithSkip);
+ */
+
+ // Retrieve a user with randomly
+ /* $randomUser = $users->inRandomOrder()->first();
+ print_r($randomUser);
+ */
+
+ // Retrieve a user with having and groupby
+ /* $users=$users->groupBy('age')
+    ->having('age', '>', 22)
+    ->get();
+print_r($users); */
+
 
 // Retrieve selected columns
 /* $allSelectedRows = $users->select('name', 'email')->get();
@@ -418,6 +886,12 @@ print_r($user); */
 // Retrieve the first result of a query
 /* $firstUser = $users->where('name', 'John Doe')->first();
 print_r($firstUser); */
+
+// Retrieve the latest first result of a query
+/* $latest = $users->latest()->first();
+
+print_r($latest);
+ */
 
 // Retrieve a specific value from the first result of a query
 /* $email = $users->where('name', 'John Doe')->value('email');
